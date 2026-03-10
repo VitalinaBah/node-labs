@@ -1,128 +1,81 @@
-const { createServer } = require("node:http");
+const http = require('http');
+const config = require('./config');
 
-let STUDENTS = [
-  { id: 1, name: "Ivan", grades: [5, 4, 5], course: 2 }
-];
+// Формат: [INFO] GET /students | Status: 404 | Agent: Mozilla/5.0... | IP: 127.0.0.1
+const logger = (req, res) => {
+    const level = res.statusCode >= 400 ? 'ERROR' : 'INFO';
+    const method = req.method;
+    const url = req.url;
+    const status = res.statusCode;
+    const agent = req.headers['user-agent'] || 'Unknown Agent';
+    const ip = req.socket.remoteAddress || 'Unknown IP';
 
-const PORT = process.env.PORT || 3000;
-const HOSTNAME = process.env.HOSTNAME || "localhost";
+    const logLine = `[${level}] ${method} ${url} | Status: ${status} | Agent: ${agent} | IP: ${ip}\n`;
 
-const server = createServer((req, res) => {
-  const method = req.method;
-  const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = parsedUrl.pathname;
-
-  res.setHeader("Content-Type", "application/json");
-
-  // GET /students
-  if (method === "GET" && pathname === "/students") {
-    const course = parsedUrl.searchParams.get("course");
-
-    let result = [...STUDENTS];
-
-    if (course) {
-      result = result.filter(s => s.course === Number(course));
+    if (config.NODE_ENV === 'development') {
+        process.stdout.write(logLine);
+    } else if (config.NODE_ENV === 'production' && res.statusCode >= 400) {
+        process.stderr.write(logLine);
     }
+};
 
-    res.statusCode = 200;
-    return res.end(JSON.stringify(result));
-  }
-
-  // POST /students
-  if (method === "POST" && pathname === "/students") {
-    let body = "";
-
-    req.on("data", chunk => {
-      body += chunk.toString();
-    });
-
-    req.on("end", () => {
-      try {
-        const data = JSON.parse(body);
-
-        if (!data.name || !data.course) {
-          res.statusCode = 400;
-          return res.end(JSON.stringify({ error: "Name and course required" }));
-        }
-
-        const newStudent = {
-          id: STUDENTS.length + 1,
-          name: data.name,
-          grades: data.grades || [],
-          course: data.course
+const server = http.createServer((req, res) => {
+    // Ендпоінт /health (Завдання 8)
+    if (req.url === '/health' && req.method === 'GET') {
+        const healthData = {
+            pid: process.pid,
+            nodeVersion: process.version,
+            platform: process.platform,
+            uptime: Math.floor(process.uptime()) + 's',
+            memoryUsage: process.memoryUsage()
         };
-
-        STUDENTS.push(newStudent);
-
-        res.statusCode = 201;
-        res.end(JSON.stringify(newStudent));
-
-      } catch {
-        res.statusCode = 400;
-        res.end(JSON.stringify({ error: "Invalid JSON" }));
-      }
-    });
-
-    return;
-  }
-
-  // PATCH /students/:id
-  if (method === "PATCH" && pathname.startsWith("/students/")) {
-
-    const id = Number(pathname.split("/")[2]);
-
-    let body = "";
-
-    req.on("data", chunk => {
-      body += chunk.toString();
-    });
-
-    req.on("end", () => {
-
-      const student = STUDENTS.find(s => s.id === id);
-
-      if (!student) {
-        res.statusCode = 404;
-        return res.end(JSON.stringify({ error: "Student not found" }));
-      }
-
-      const updates = JSON.parse(body);
-
-      delete updates.id;
-
-      Object.assign(student, updates);
-
-      res.statusCode = 200;
-      res.end(JSON.stringify(student));
-
-    });
-
-    return;
-  }
-
-  // DELETE /students/:id
-  if (method === "DELETE" && pathname.startsWith("/students/")) {
-
-    const id = Number(pathname.split("/")[2]);
-
-    const originalLength = STUDENTS.length;
-
-    STUDENTS = STUDENTS.filter(s => s.id !== id);
-
-    if (STUDENTS.length === originalLength) {
-      res.statusCode = 404;
-      return res.end(JSON.stringify({ error: "Student not found" }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(healthData));
+        logger(req, res);
+        return;
     }
 
-    res.statusCode = 200;
-    res.end(JSON.stringify({ message: "Student removed" }));
-    return;
-  }
-
-  res.statusCode = 404;
-  res.end(JSON.stringify({ error: "Route not found" }));
+    // Стандартна відповідь
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Сервер працює');
+    logger(req, res);
 });
 
-server.listen(PORT, HOSTNAME, () => {
-  console.log(`Server running at http://${HOSTNAME}:${PORT}`);
+// Запуск сервера
+server.listen(config.PORT, config.HOSTNAME, () => {
+    console.log(`Сервер запущено: http://${config.HOSTNAME}:${config.PORT}/`);
+});
+
+// Функція Graceful Shutdown (Завдання 5)
+function gracefulShutdown(signal) {
+    console.log(`\n[SYSTEM] Отримано сигнал: ${signal}. Закриваємо ресурси...`);
+
+    const forceExitTimeout = setTimeout(() => {
+        console.error("[SYSTEM] Не вдалося завершити роботу вчасно. Примусовий вихід.");
+        process.exit(1);
+    }, 10000);
+
+    server.close((err) => {
+        clearTimeout(forceExitTimeout);
+        if (err) {
+            console.error("[SYSTEM] Помилка при закритті сервера:", err);
+            process.exit(1);
+        }
+        console.log("[SYSTEM] Сервер успішно зупинено. Процес завершено.");
+        process.exit(0);
+    });
+}
+
+// Обробка сигналів та помилок (Завдання 6 та 7)
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+process.on('uncaughtException', (err) => {
+    console.error(`[CRITICAL] Uncaught Exception: ${err.message}`);
+    gracefulShutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error(`[CRITICAL] Unhandled Rejection: ${reason}`);
+    gracefulShutdown('unhandledRejection');
 });
