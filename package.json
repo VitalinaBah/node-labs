@@ -2,6 +2,7 @@
   "name": "lab3-server",
   "version": "1.0.0",
   "description": "Node.js server - Lab 3, Variant 4",
+  "type": "module",
   "main": "server.js",
   "engines": {
     "node": ">=20.0.0",
@@ -18,21 +19,11 @@
     "check": "npm run lint && npm run format:check"
   },
   "imports": {
-    "#config/*": "./config/*.js",
-    "#constants/*": "./constants/*.js",
-    "#utils/*": "./utils/*.js",
-    "#validators/*": "./validators/*.js",
-    "#routes/*": "./routes/*.js",
-    "#controllers/*": "./controllers/*.js"
-  },
-  "dependencies": {
-    "ajv": "^8.18.0"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "eslint": "^9.39.4",
-    "eslint-config-prettier": "^10.1.8",
-    "nodemon": "^3.1.14",
-    "prettier": "^3.8.1"
-  }
+  "#config/*": "./config/*",
+  "#constants/*": "./constants/*",
+  "#utils/*": "./utils/*",
+  "#validators/*": "./validators/*",
+  "#routes/*": "./routes/*",
+  "#controllers/*": "./controllers/*"
+}
 }

@@ -1,18 +1,18 @@
-const Ajv = require("ajv");
+import Ajv from 'ajv';
 
 const ajv = new Ajv();
 
 const envSchema = {
-  type: "object",
+  type: 'object',
   properties: {
-    PORT: { type: "string", pattern: "^[0-9]+$" },
-    HOSTNAME: { type: "string", minLength: 1 },
-    NODE_ENV: { type: "string", enum: ["development", "production"] },
+    PORT: { type: 'string', pattern: '^[0-9]+$' },
+    HOSTNAME: { type: 'string', minLength: 1 },
+    NODE_ENV: { type: 'string', enum: ['development', 'production'] },
   },
-  required: ["PORT", "NODE_ENV"],
+  required: ['PORT', 'NODE_ENV'],
   additionalProperties: true,
 };
 
 const validate = ajv.compile(envSchema);
 
-module.exports = validate;
+export default validate;

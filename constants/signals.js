@@ -1,4 +1,4 @@
-module.exports = {
-  SIGINT: "SIGINT",
-  SIGTERM: "SIGTERM",
+export default {
+  SIGINT: 'SIGINT',
+  SIGTERM: 'SIGTERM',
 };
