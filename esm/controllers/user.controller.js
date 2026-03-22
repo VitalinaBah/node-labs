@@ -1,18 +1,16 @@
 import * as userRepository from '../repositories/user.repository.js';
-import { count } from '../state/request-counter.js';
-import { initPermissions } from '../services/user.service.js';
+import { increment } from '../state/request-counter.js';
 
-initPermissions();
+// ВИДАЛЕНО: initPermissions та циклічний імпорт user.service
 
 export const getUsers = async (request, reply) => {
-  count++;
-
+  increment(); // замість count++ на примітиві
   const users = await userRepository.findAll();
   return { users };
 };
 
-const getUserById = async (request, reply) => {
-  count++;
+export const getUserById = async (request, reply) => {
+  increment();
   const { id } = request.params;
   const user = await userRepository.findById(id);
   if (!user) {
@@ -21,6 +19,3 @@ const getUserById = async (request, reply) => {
   return { user };
 };
 
-export default {
-  getUserById
-};
