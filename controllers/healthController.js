@@ -1,13 +1,15 @@
-const getHealth = (req, res) => {
-  const healthData = {
+const getHealth = async (request, reply) => {
+  return reply.send({ status: 'ok' });
+};
+
+const getHealthDetails = async (request, reply) => {
+  return reply.send({
     pid: process.pid,
     nodeVersion: process.version,
     platform: process.platform,
     uptime: Math.floor(process.uptime()) + 's',
     memoryUsage: process.memoryUsage(),
-  };
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(healthData));
+  });
 };
 
-export { getHealth };
+export { getHealth, getHealthDetails };
