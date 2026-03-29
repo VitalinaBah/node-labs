@@ -7,8 +7,9 @@ import { envSchema } from '#schemas/envSchema.js';
 import healthRoutes from '#routes/health.js';
 import studentRoutes from '#routes/students.js';
 import gracefulShutdown from '#utils/gracefulShutdown.js';
+import ENV from '#constants/environments.js';
 
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = process.env.NODE_ENV !== ENV.PRODUCTION;
 
 const fastify = Fastify({
   logger: isDev
@@ -25,7 +26,7 @@ const fastify = Fastify({
 await fastify.register(fastifyEnv, { schema: envSchema, dotenv: true });
 
 await fastify.register(fastifyCors, {
-  origin: fastify.config.NODE_ENV === 'development' ? '*' : fastify.config.ALLOWED_ORIGIN,
+  origin: fastify.config.NODE_ENV === ENV.DEVELOPMENT ? '*' : fastify.config.ALLOWED_ORIGIN,
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
 });
 

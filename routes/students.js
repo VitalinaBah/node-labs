@@ -9,7 +9,7 @@ import {
   studentBodySchema,
   studentPatchSchema,
   studentParamSchema,
-} from '#validators/studentSchema.js';
+} from '#schemas/studentSchema.js';
 
 const studentRoutes = async (fastify) => {
   fastify.get('/', {

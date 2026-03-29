@@ -1,3 +1,5 @@
+import ENV from '#constants/environments.js';
+
 export const envSchema = {
   type: 'object',
   properties: {
@@ -12,10 +14,10 @@ export const envSchema = {
       default: 'localhost',
     },
     NODE_ENV: {
-      type: 'string',
-      enum: ['development', 'production'],
-      default: 'development',
-    },
+  type: 'string',
+  enum: [ENV.DEVELOPMENT, ENV.PRODUCTION],
+  default: ENV.DEVELOPMENT,
+},
     ADMIN_API_KEY: {
       type: 'string',
       minLength: 8,

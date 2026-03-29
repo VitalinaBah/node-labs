@@ -21,10 +21,10 @@
   "imports": {
   "#constants/*": "./constants/*",
   "#utils/*": "./utils/*",
-  "#validators/*": "./validators/*",
   "#routes/*": "./routes/*",
   "#controllers/*": "./controllers/*",
-  "#schemas/*": "./schemas/*"
+  "#schemas/*": "./schemas/*",
+  "#repositories/*": "./repositories/*"
 },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
