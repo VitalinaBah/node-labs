@@ -9,28 +9,36 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
-  "start": "node --env-file=.env server.js",
-  "predev": "npm run check",
-  "dev": "node --watch --env-file=.env server.js",
-  "lint": "eslint .",
-  "lint:fix": "eslint . --fix",
-  "format": "prettier --write .",
-  "format:check": "prettier --check .",
-  "check": "npm run lint && npm run format:check"
-},
+    "start": "node --env-file=.env server.js",
+    "predev": "npm run check",
+    "dev": "node --watch --env-file=.env server.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check",
+    "seed": "node src/scripts/seed.js",
+    "migrate": "node src/migrations/migrate.js"
+  },
   "imports": {
-  "#constants/*": "./constants/*",
-  "#utils/*": "./utils/*",
-  "#routes/*": "./routes/*",
-  "#controllers/*": "./controllers/*",
-  "#schemas/*": "./schemas/*",
-  "#repositories/*": "./repositories/*"
-},
+    "#constants/*": "./constants/*",
+    "#utils/*": "./utils/*",
+    "#routes/*": "./routes/*",
+    "#controllers/*": "./controllers/*",
+    "#schemas/*": "./schemas/*",
+    "#repositories/*": "./repositories/*"
+  },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
     "@fastify/env": "^5.0.3",
     "@fastify/helmet": "^13.0.2",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/sensible": "^6.0.4",
+    "@fastify/static": "^9.0.0",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
+    "csv-parse": "^6.2.1",
+    "csv-stringify": "^6.7.0",
     "fastify": "^5.8.4"
   },
   "devDependencies": {

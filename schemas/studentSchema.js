@@ -1,4 +1,3 @@
-// GET /students?course=2
 export const studentQuerySchema = {
   type: 'object',
   properties: {
@@ -7,7 +6,6 @@ export const studentQuerySchema = {
   additionalProperties: true,
 };
 
-// POST /students body
 export const studentBodySchema = {
   type: 'object',
   properties: {
@@ -17,12 +15,12 @@ export const studentBodySchema = {
       items: { type: 'number', minimum: 1, maximum: 5 },
     },
     course: { type: 'integer', minimum: 1, maximum: 6 },
+    email: { type: 'string', format: 'email' },
   },
   required: ['name', 'course'],
   additionalProperties: false,
 };
 
-// PATCH /students body
 export const studentPatchSchema = {
   type: 'object',
   properties: {
@@ -32,12 +30,12 @@ export const studentPatchSchema = {
       items: { type: 'number', minimum: 1, maximum: 5 },
     },
     course: { type: 'integer', minimum: 1, maximum: 6 },
+    email: { type: 'string', format: 'email' },
   },
   minProperties: 1,
   additionalProperties: false,
 };
 
-// :id param
 export const studentParamSchema = {
   type: 'object',
   properties: {

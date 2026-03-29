@@ -1,34 +1,70 @@
-let STUDENTS = [{ id: 1, name: 'Ivan', grades: [5, 4, 5], course: 2 }];
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import StudentModel from '../src/models/item.model.js';
 
-export const findAll = () => [...STUDENTS];
+const DATA_DIR = path.join(process.cwd(), 'data', 'items');
 
-export const findByCourse = (course) =>
-  STUDENTS.filter((s) => s.course === Number(course));
+const atomicWrite = async (filePath, data) => {
+  const tmpPath = filePath.replace('.json', '.tmp.json');
+  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+  await fs.rename(tmpPath, filePath);
+};
 
-export const findById = (id) =>
-  STUDENTS.find((s) => s.id === Number(id));
+const getFilePath = (id) => path.join(DATA_DIR, `${id}.json`);
 
-export const create = (data) => {
-  const newStudent = {
-    id: STUDENTS.length + 1,
-    name: data.name,
-    grades: data.grades || [],
-    course: data.course,
-  };
-  STUDENTS.push(newStudent);
+const readStudent = async (id) => {
+  const content = await fs.readFile(getFilePath(id), 'utf-8');
+  return JSON.parse(content);
+};
+
+export const findAll = async () => {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const files = await fs.readdir(DATA_DIR);
+  const jsonFiles = files.filter((f) => f.endsWith('.json'));
+  const students = await Promise.all(
+    jsonFiles.map((f) => {
+      const id = f.replace('.json', '');
+      return readStudent(id);
+    }),
+  );
+  return students;
+};
+
+export const findByCourse = async (course) => {
+  const all = await findAll();
+  return all.filter((s) => s.course === Number(course));
+};
+
+export const findById = async (id) => {
+  try {
+    return await readStudent(id);
+  } catch {
+    return null;
+  }
+};
+
+export const create = async (data) => {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const all = await findAll();
+  const newId = all.length > 0 ? Math.max(...all.map((s) => s.id)) + 1 : 1;
+  const newStudent = { ...StudentModel, ...data, id: newId };
+  await atomicWrite(getFilePath(newId), newStudent);
   return newStudent;
 };
 
-export const update = (id, updates) => {
-  const student = findById(id);
+export const update = async (id, updates) => {
+  const student = await findById(id);
   if (!student) return null;
-  delete updates.id;
-  Object.assign(student, updates);
-  return student;
+  const updated = { ...student, ...updates, id: student.id };
+  await atomicWrite(getFilePath(id), updated);
+  return updated;
 };
 
-export const remove = (id) => {
-  const originalLength = STUDENTS.length;
-  STUDENTS = STUDENTS.filter((s) => s.id !== Number(id));
-  return STUDENTS.length !== originalLength;
+export const remove = async (id) => {
+  try {
+    await fs.unlink(getFilePath(id));
+    return true;
+  } catch {
+    return false;
+  }
 };
