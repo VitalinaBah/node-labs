@@ -9,6 +9,7 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { studentBodySchema } from '#schemas/studentSchema.js';
 import { formatImageUrl } from '#utils/formatImageUrl.js';
+import { findCourseById } from '../services/externalService.js';
 
 const ajv = new Ajv();
 addFormats(ajv);
@@ -17,7 +18,7 @@ const validateStudent = ajv.compile(studentBodySchema);
 const ALLOWED_MIME = ['image/jpeg', 'image/png'];
 const MAX_SIZE = 5 * 1024 * 1024;
 
-// GET /students
+// GET /api/v1/students
 const getStudents = async (request, reply) => {
   const { course } = request.query;
   const result = course
@@ -26,7 +27,31 @@ const getStudents = async (request, reply) => {
   return reply.send(result.map((s) => ({ ...s, image: formatImageUrl(request, s.image) })));
 };
 
-// GET /students/:id
+// GET /api/v2/students  — пагінований список
+const getStudentsPaginated = async (request, reply) => {
+  const page = Number(request.query.page) || 1;
+  const limit = Number(request.query.limit) || 10;
+  const courseFilter = request.query.course;
+
+  let all = await studentsRepo.findAll();
+  if (courseFilter !== undefined) {
+    all = all.filter((s) => Number(s.course) === Number(courseFilter));
+  }
+
+  const total = all.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const start = (page - 1) * limit;
+  const slice = all.slice(start, start + limit);
+
+  const data = slice.map((s) => ({ ...s, image: formatImageUrl(request, s.image) }));
+
+  return reply.send({
+    data,
+    meta: { total, page, limit, totalPages },
+  });
+};
+
+// GET /api/v1/students/:id
 const getStudentById = async (request, reply) => {
   const { id } = request.params;
   const student = await studentsRepo.findById(id);
@@ -34,7 +59,24 @@ const getStudentById = async (request, reply) => {
   return reply.send({ ...student, image: formatImageUrl(request, student.image) });
 };
 
-// GET /students/export
+// GET /api/v2/students/:id  — з деталями курсу із зовнішнього API
+const getStudentByIdWithDetails = async (request, reply) => {
+  const { id } = request.params;
+  const student = await studentsRepo.findById(id);
+  if (!student) return reply.notFound('Student not found');
+
+  const courseDetails = student.course
+    ? await findCourseById(student.course)
+    : null;
+
+  return reply.send({
+    ...student,
+    image: formatImageUrl(request, student.image),
+    courseDetails, // null, якщо зовнішнє API недоступне (graceful degradation)
+  });
+};
+
+// GET /api/v1/students/export
 const getStudentsExport = async (request, reply) => {
   const students = await studentsRepo.findAll();
 
@@ -48,13 +90,13 @@ const getStudentsExport = async (request, reply) => {
   return reply.send(csv);
 };
 
-// POST /students
+// POST /api/v*/students
 const createStudent = async (request, reply) => {
   const newStudent = await studentsRepo.create(request.body);
   return reply.code(201).send({ ...newStudent, image: formatImageUrl(request, newStudent.image) });
 };
 
-// PATCH /students/:id
+// PATCH /api/v*/students/:id
 const updateStudent = async (request, reply) => {
   const { id } = request.params;
   const updated = await studentsRepo.update(id, request.body);
@@ -62,7 +104,7 @@ const updateStudent = async (request, reply) => {
   return reply.send({ ...updated, image: formatImageUrl(request, updated.image) });
 };
 
-// DELETE /students/:id
+// DELETE /api/v*/students/:id
 const deleteStudent = async (request, reply) => {
   const { id } = request.params;
   const removed = await studentsRepo.remove(id);
@@ -70,7 +112,7 @@ const deleteStudent = async (request, reply) => {
   return reply.send({ message: 'Student removed' });
 };
 
-// POST /students/import
+// POST /api/v1/students/import
 const importStudents = async (request, reply) => {
   const file = await request.file();
   if (!file) return reply.badRequest('Файл не завантажено');
@@ -121,7 +163,7 @@ const importStudents = async (request, reply) => {
   return reply.send({ imported, rejected });
 };
 
-// POST /students/:id/image
+// POST /api/v*/students/:id/image
 const uploadStudentImage = async (request, reply) => {
   const { id } = request.params;
 
@@ -131,20 +173,22 @@ const uploadStudentImage = async (request, reply) => {
   const file = await request.file({ limits: { fileSize: MAX_SIZE } });
   if (!file) return reply.badRequest('Файл не завантажено');
 
-const filename_lower = file.filename.toLowerCase();
-const isValidMime = ALLOWED_MIME.includes(file.mimetype);
-const isValidExt = filename_lower.endsWith('.jpg') || 
-                   filename_lower.endsWith('.jpeg') || 
-                   filename_lower.endsWith('.png');
+  const filename_lower = file.filename.toLowerCase();
+  const isValidMime = ALLOWED_MIME.includes(file.mimetype);
+  const isValidExt =
+    filename_lower.endsWith('.jpg') ||
+    filename_lower.endsWith('.jpeg') ||
+    filename_lower.endsWith('.png');
 
-if (!isValidMime && !isValidExt) {
-  return reply.badRequest('Дозволені тільки image/jpeg та image/png');
-}
+  if (!isValidMime && !isValidExt) {
+    return reply.badRequest('Дозволені тільки image/jpeg та image/png');
+  }
 
   const uploadDir = path.join(process.cwd(), 'uploads', String(id));
   await fs.mkdir(uploadDir, { recursive: true });
 
-  const ext = (file.mimetype === 'image/png' || filename_lower.endsWith('.png')) ? 'png' : 'jpg';
+  const ext =
+    file.mimetype === 'image/png' || filename_lower.endsWith('.png') ? 'png' : 'jpg';
   const fileName = `image.${ext}`;
   const filePath = path.join(uploadDir, fileName);
 
@@ -158,7 +202,9 @@ if (!isValidMime && !isValidExt) {
 
 export {
   getStudents,
+  getStudentsPaginated,
   getStudentById,
+  getStudentByIdWithDetails,
   getStudentsExport,
   createStudent,
   updateStudent,
