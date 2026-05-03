@@ -1,7 +1,7 @@
 {
-  "name": "lab6-server",
+  "name": "lab7-server",
   "version": "1.0.0",
-  "description": "Лабораторна 6 — REST API + fetch + Swagger (Variant 4: Students)",
+  "description": "Лабораторна 7 — Streams, gzip, Transform, NDJSON, WebSocket + EventEmitter (Variant 4: Students)",
   "type": "module",
   "main": "server.js",
   "engines": {
@@ -29,7 +29,9 @@
     "#schemas/*": "./schemas/*",
     "#repositories/*": "./repositories/*",
     "#services/*": "./services/*",
-    "#plugins/*": "./plugins/*"
+    "#plugins/*": "./plugins/*",
+    "#transforms/*": "./src/transforms/*",
+    "#streams/*": "./src/streams/*"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
@@ -41,6 +43,7 @@
     "@fastify/static": "^9.0.0",
     "@fastify/swagger": "^9.5.2",
     "@fastify/swagger-ui": "^5.2.3",
+    "@fastify/websocket": "^11.2.0",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
     "csv-parse": "^6.2.1",

@@ -3,6 +3,7 @@ import {
   getStudentById,
   getStudentByIdWithDetails,
   getStudentsExport,
+  getStudentsStream,
   createStudent,
   updateStudent,
   deleteStudent,
@@ -36,11 +37,30 @@ const studentRoutesV1 = async (fastify) => {
     {
       schema: {
         tags: [TAG],
-        summary: 'Експорт студентів у CSV',
+        summary:
+          'Потоковий експорт студентів у CSV (?transform=true → grades→avgGrade)',
         produces: ['text/csv'],
+        querystring: {
+          type: 'object',
+          properties: { transform: { type: 'string', enum: ['true', 'false'] } },
+          additionalProperties: false,
+        },
       },
     },
     getStudentsExport,
+  );
+
+  // Lab 7: NDJSON стрім
+  fastify.get(
+    '/stream',
+    {
+      schema: {
+        tags: [TAG],
+        summary: 'Потокова віддача студентів у NDJSON (по 1 запису)',
+        produces: ['application/x-ndjson'],
+      },
+    },
+    getStudentsStream,
   );
 
   fastify.post(
@@ -79,14 +99,13 @@ const studentRoutesV1 = async (fastify) => {
     getStudentById,
   );
 
-  // Новий ендпоінт за вимогою завдання: запис + дані з зовнішнього API
+  // Lab 6: запис + дані з зовнішнього API
   fastify.get(
     '/:id/details',
     {
       schema: {
         tags: [TAG],
-        summary:
-          'Студент + дані курсу з json-server (fetch + retry + cache + graceful)',
+        summary: 'Студент + дані курсу з json-server (fetch + retry + cache + graceful)',
         params: studentParamSchema,
       },
     },

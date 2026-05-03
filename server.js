@@ -19,6 +19,7 @@ import { runBackup } from '#utils/backup.js';
 import StudentModel from './src/models/item.model.js';
 import apiV1Plugin from '#plugins/apiV1.js';
 import apiV2Plugin from '#plugins/apiV2.js';
+import realtimePlugin from '#plugins/realtime.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== ENV.PRODUCTION;
@@ -44,17 +45,17 @@ await fastify.register(fastifyCors, {
 
 await fastify.register(fastifyHelmet, {
   global: true,
-  // дозволяємо Swagger UI завантажувати свої скрипти/стилі
   contentSecurityPolicy: false,
 });
 await fastify.register(fastifySensible);
 await fastify.register(fastifyMultipart);
 
-// Rate limit: 100 запитів/хвилина на IP, /docs не обмежуємо
+// Rate limit: 100 запитів/хвилина на IP, /docs та /api/v1/ws не обмежуємо
 await fastify.register(fastifyRateLimit, {
   max: 100,
   timeWindow: '1 minute',
-  allowList: (req) => req.url.startsWith('/docs'),
+  allowList: (req) =>
+    req.url.startsWith('/docs') || req.url.startsWith('/api/v1/ws'),
   errorResponseBuilder: (req, ctx) => ({
     statusCode: 429,
     error: 'Too Many Requests',
@@ -67,17 +68,19 @@ await fastify.register(fastifySwagger, {
   openapi: {
     openapi: '3.0.3',
     info: {
-      title: 'Lab 6 API — Students',
+      title: 'Lab 7 API — Students',
       description:
-        'REST API для управління студентами (Variant 4). Підтримує версіонування v1/v2, ' +
-        'пагінацію, rate limiting (100 req/min), інтеграцію з json-server та GitHub API.',
+        'REST API для управління студентами (Variant 4). ' +
+        'Lab 7 додає: gzip-бекапи через pipeline(), Transform-stream для CSV/NDJSON, ' +
+        'WebSocket + EventEmitter для real-time сповіщень, потокову віддачу .gz архівів.',
       version: '1.0.0',
     },
     servers: [{ url: `http://localhost:${process.env.PORT || 3000}` }],
     tags: [
       { name: 'health', description: 'Перевірка стану сервера' },
-      { name: 'items v1', description: 'Студенти — REST API v1 (CRUD без пагінації)' },
+      { name: 'items v1', description: 'Студенти — REST API v1 (CRUD + stream + export)' },
       { name: 'items v2', description: 'Студенти — REST API v2 (з пагінацією)' },
+      { name: 'backups', description: 'Завантаження gzip-бекапів (admin)' },
       { name: 'github v1 (REST)', description: 'GitHub-інтеграція через REST API' },
       {
         name: 'github v2 (REST + GraphQL)',
@@ -109,6 +112,9 @@ fastify.setErrorHandler((error, request, reply) => {
   );
   reply.send(error);
 });
+
+// Lab 7: WebSocket-плагін реєструється з префіксом /api/v1
+await fastify.register(realtimePlugin, { prefix: '/api/v1' });
 
 // Версіонований API
 await fastify.register(apiV1Plugin, { prefix: '/api/v1' });
@@ -146,3 +152,4 @@ try {
 
 await fastify.listen({ port: fastify.config.PORT, host: fastify.config.HOSTNAME });
 fastify.log.info(`Swagger UI: http://${fastify.config.HOSTNAME}:${fastify.config.PORT}/docs`);
+fastify.log.info(`WebSocket:  ws://${fastify.config.HOSTNAME}:${fastify.config.PORT}/api/v1/ws`);
