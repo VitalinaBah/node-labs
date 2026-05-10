@@ -8,6 +8,13 @@
       "when": 1778423051896,
       "tag": "0000_foamy_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1778439871392,
+      "tag": "0001_blushing_forge",
+      "breakpoints": true
     }
   ]
 }

@@ -1,83 +1,64 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import { REDIS_KEYS, REDIS_TTL } from '#constants/redisKeys.js';
 
-const CACHE_FILE = path.join(process.cwd(), 'data', 'cache', 'reference.json');
 const TIMEOUT_MS = 5000;
-const RETRY_ATTEMPTS = 3;
-const TTL_MS = 120 * 1000;
+const RETRIES = 3;
 
-export const fetchWithTimeout = async (url, options = {}, timeout = TIMEOUT_MS) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+export const fetchWithTimeout = async (url, options = {}) => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, { ...options, signal: ctrl.signal });
   } finally {
-    clearTimeout(timer);
+    clearTimeout(t);
   }
 };
 
-export const fetchWithRetry = async (url, options = {}, attempts = RETRY_ATTEMPTS) => {
-  let lastError;
-  for (let attempt = 0; attempt < attempts; attempt++) {
+export const fetchWithRetry = async (url, options = {}, log) => {
+  let lastErr;
+  for (let attempt = 1; attempt <= RETRIES; attempt++) {
     try {
       const res = await fetchWithTimeout(url, options);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      }
-      return await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
     } catch (err) {
-      lastError = err;
-      if (attempt < attempts - 1) {
-        const delay = 1000 * Math.pow(2, attempt);
-        console.warn(
-          `[external] attempt ${attempt + 1} failed (${err.message}), retrying in ${delay}ms`,
-        );
-        await new Promise((r) => setTimeout(r, delay));
+      lastErr = err;
+      const delay = 1000 * 2 ** (attempt - 1);
+      log?.warn?.(`[external] attempt ${attempt} failed (${err.message}), retrying in ${delay}ms`);
+      if (attempt < RETRIES) await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+};
+
+/**
+ * Сервіс роботи з зовнішнім API (json-server). DI: factory отримує redis і конфіг.
+ * Lab 6: був файловий кеш у data/cache/reference.json. Lab 9: Redis з TTL 120с.
+ */
+export const createExternalService = ({ redis, baseUrl, log }) => {
+  const findCourseById = async (id) => {
+    const key = REDIS_KEYS.COURSE(id);
+
+    try {
+      const cached = await redis.get(key);
+      if (cached !== null) return JSON.parse(cached);
+    } catch (err) {
+      log?.warn?.({ err }, '[external] redis read failed, fall back to API');
+    }
+
+    try {
+      const res = await fetchWithRetry(`${baseUrl}/courses/${id}`, {}, log);
+      const data = await res.json();
+      try {
+        await redis.set(key, JSON.stringify(data), 'EX', REDIS_TTL.COURSE);
+      } catch (err) {
+        log?.warn?.({ err }, '[external] redis write failed');
       }
+      return data;
+    } catch (err) {
+      log?.warn?.({ err }, '[external] external API unavailable — graceful degradation');
+      return null;
     }
-  }
-  throw lastError;
-};
+  };
 
-const readCache = async () => {
-  try {
-    const raw = await fs.readFile(CACHE_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-};
-
-const writeCache = async (payload) => {
-  await fs.mkdir(path.dirname(CACHE_FILE), { recursive: true });
-  await fs.writeFile(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
-};
-
-export const fetchCourses = async () => {
-  const baseUrl = process.env.EXTERNAL_API_URL || 'http://localhost:3001';
-  const url = `${baseUrl}/courses`;
-
-  const cache = await readCache();
-  if (cache && Date.now() - cache.timestamp < TTL_MS) {
-    return { data: cache.data, source: 'cache' };
-  }
-
-  try {
-    const data = await fetchWithRetry(url);
-    await writeCache({ timestamp: Date.now(), data });
-    return { data, source: 'live' };
-  } catch (err) {
-    console.error('[external] fetchCourses failed:', err.message);
-    if (cache) {
-      console.warn('[external] returning stale cache');
-      return { data: cache.data, source: 'stale-cache' };
-    }
-    return { data: null, source: 'unavailable' };
-  }
-};
-
-export const findCourseById = async (courseId) => {
-  const { data } = await fetchCourses();
-  if (!data) return null;
-  return data.find((c) => c.id === Number(courseId)) ?? null;
+  return { findCourseById };
 };

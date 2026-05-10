@@ -8,7 +8,6 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { studentBodySchema } from '#schemas/studentSchema.js';
 import { formatImageUrl } from '#utils/formatImageUrl.js';
-import { findCourseById } from '../services/externalService.js';
 import { eventBus, STUDENT_EVENTS } from '#services/eventBus.js';
 import { StudentAvgGradeTransform } from '#transforms/studentAvgGradeTransform.js';
 import { NdjsonTransform } from '#transforms/ndjsonTransform.js';
@@ -20,10 +19,12 @@ const validateStudent = ajv.compile(studentBodySchema);
 const ALLOWED_MIME = ['image/jpeg', 'image/png'];
 const MAX_SIZE = 5 * 1024 * 1024;
 
-// --- helper: репозиторій з декоратора Fastify (DI) ---
 const repo = (request) => request.server.studentsRepo;
+const cacheSvc = (request) => request.server.studentsCacheSvc;
+const externalSvc = (request) => request.server.externalSvc;
 
-// GET /api/v1/students
+// ---------------- READ ----------------
+
 const getStudents = async (request, reply) => {
   const { course } = request.query;
   const result = course
@@ -32,16 +33,28 @@ const getStudents = async (request, reply) => {
   return reply.send(result.map((s) => ({ ...s, image: formatImageUrl(request, s.image) })));
 };
 
-// GET /api/v2/students  — пагінований список (через схему + поступово)
+// GET /api/v2/students — пагінація + Redis-кеш на 24 години
 const getStudentsPaginated = async (request, reply) => {
   const { page, limit, course } = request.query;
+
+  // 1) cache hit
+  const cached = await cacheSvc(request).get({ page, limit, course });
+  if (cached) {
+    reply.header('X-Cache', 'HIT');
+    return reply.send(cached);
+  }
+
+  // 2) cache miss → БД
   const { data: slice, total } = await repo(request).findPage({ page, limit, course });
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const data = slice.map((s) => ({ ...s, image: formatImageUrl(request, s.image) }));
-  return reply.send({ data, meta: { total, page, limit, totalPages } });
+  const payload = { data, meta: { total, page, limit, totalPages } };
+
+  await cacheSvc(request).set({ page, limit, course }, payload);
+  reply.header('X-Cache', 'MISS');
+  return reply.send(payload);
 };
 
-// GET /api/v1/students/:id
 const getStudentById = async (request, reply) => {
   const { id } = request.params;
   const student = await repo(request).findById(id);
@@ -49,12 +62,13 @@ const getStudentById = async (request, reply) => {
   return reply.send({ ...student, image: formatImageUrl(request, student.image) });
 };
 
-// GET /api/v1/students/:id/details
 const getStudentByIdWithDetails = async (request, reply) => {
   const { id } = request.params;
   const student = await repo(request).findById(id);
   if (!student) return reply.notFound('Student not found');
-  const courseDetails = student.course ? await findCourseById(student.course) : null;
+  const courseDetails = student.course
+    ? await externalSvc(request).findCourseById(student.course)
+    : null;
   return reply.send({
     ...student,
     image: formatImageUrl(request, student.image),
@@ -62,7 +76,6 @@ const getStudentByIdWithDetails = async (request, reply) => {
   });
 };
 
-// GET /api/v1/students/export?transform=true
 const getStudentsExport = async (request, reply) => {
   const useTransform = String(request.query?.transform).toLowerCase() === 'true';
   const columns = useTransform
@@ -81,46 +94,45 @@ const getStudentsExport = async (request, reply) => {
   );
 
   const source = repo(request).cursor();
-  if (useTransform) {
-    return reply.send(source.pipe(new StudentAvgGradeTransform()).pipe(csvStream));
-  }
-  return reply.send(source.pipe(csvStream));
+  return useTransform
+    ? reply.send(source.pipe(new StudentAvgGradeTransform()).pipe(csvStream))
+    : reply.send(source.pipe(csvStream));
 };
 
-// GET /api/v1/students/stream — NDJSON
 const getStudentsStream = async (request, reply) => {
   reply.type('application/x-ndjson');
   return reply.send(repo(request).cursor().pipe(new NdjsonTransform()));
 };
 
-// POST /api/v*/students
+// ---------------- WRITE — інвалідують кеш списку ----------------
+
 const createStudent = async (request, reply) => {
   const newStudent = await repo(request).create(request.body);
+  await cacheSvc(request).invalidateAll();
   const dto = { ...newStudent, image: formatImageUrl(request, newStudent.image) };
   eventBus.emit(STUDENT_EVENTS.CREATED, dto);
   return reply.code(201).send(dto);
 };
 
-// PATCH /api/v*/students/:id
 const updateStudent = async (request, reply) => {
   const { id } = request.params;
   const updated = await repo(request).update(id, request.body);
   if (!updated) return reply.notFound('Student not found');
+  await cacheSvc(request).invalidateAll();
   const dto = { ...updated, image: formatImageUrl(request, updated.image) };
   eventBus.emit(STUDENT_EVENTS.UPDATED, dto);
   return reply.send(dto);
 };
 
-// DELETE /api/v*/students/:id
 const deleteStudent = async (request, reply) => {
   const { id } = request.params;
   const removed = await repo(request).remove(id);
   if (!removed) return reply.notFound('Student not found');
+  await cacheSvc(request).invalidateAll();
   eventBus.emit(STUDENT_EVENTS.DELETED, id);
   return reply.send({ message: 'Student removed' });
 };
 
-// POST /api/v1/students/import
 const importStudents = async (request, reply) => {
   const file = await request.file();
   if (!file) return reply.badRequest('Файл не завантажено');
@@ -145,7 +157,6 @@ const importStudents = async (request, reply) => {
 
   let imported = 0;
   const rejected = [];
-
   for (let i = 0; i < records.length; i++) {
     const record = { ...records[i] };
     if (filename.endsWith('.csv')) {
@@ -167,11 +178,10 @@ const importStudents = async (request, reply) => {
     });
     imported++;
   }
-
+  if (imported > 0) await cacheSvc(request).invalidateAll();
   return reply.send({ imported, rejected });
 };
 
-// POST /api/v*/students/:id/image
 const uploadStudentImage = async (request, reply) => {
   const { id } = request.params;
   const student = await repo(request).findById(id);
@@ -200,21 +210,15 @@ const uploadStudentImage = async (request, reply) => {
 
   const relativePath = `/${id}/${fileName}`;
   const updated = await repo(request).update(id, { image: relativePath });
+  await cacheSvc(request).invalidateAll();
   const dto = { ...updated, image: formatImageUrl(request, relativePath) };
   eventBus.emit(STUDENT_EVENTS.UPDATED, dto);
   return reply.send(dto);
 };
 
 export {
-  getStudents,
-  getStudentsPaginated,
-  getStudentById,
-  getStudentByIdWithDetails,
-  getStudentsExport,
-  getStudentsStream,
-  createStudent,
-  updateStudent,
-  deleteStudent,
-  importStudents,
-  uploadStudentImage,
+  getStudents, getStudentsPaginated, getStudentById, getStudentByIdWithDetails,
+  getStudentsExport, getStudentsStream,
+  createStudent, updateStudent, deleteStudent,
+  importStudents, uploadStudentImage,
 };
