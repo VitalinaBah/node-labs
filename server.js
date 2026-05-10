@@ -18,7 +18,7 @@ import apiV1Plugin from '#plugins/apiV1.js';
 import apiV2Plugin from '#plugins/apiV2.js';
 import realtimePlugin from '#plugins/realtime.js';
 import mysqlPlugin from './db/mysql.js';
-import { checkSchemaHash } from './db/migrate.js';
+import drizzlePlugin from './db/drizzle.js';
 import { createStudentsRepository } from '#repositories/studentsRepository.js';
 import fp from 'fastify-plugin';
 
@@ -39,26 +39,24 @@ const fastify = Fastify({
 
 await fastify.register(fastifyEnv, { schema: envSchema, dotenv: true });
 
-// БД першою
+// Шар 1: pool
 await fastify.register(mysqlPlugin);
-await checkSchemaHash(fastify);
-
-// Репозиторій через декоратор (DI)
+// Шар 2: ORM поверх pool
+await fastify.register(drizzlePlugin);
+// Шар 3: репозиторій над ORM
 await fastify.register(
   fp(async (f) => {
-    f.decorate('studentsRepo', createStudentsRepository(f.mysql));
-  }, { name: 'students-repo', dependencies: ['mysql-plugin'] }),
+    f.decorate('studentsRepo', createStudentsRepository(f.drizzle));
+  }, { name: 'students-repo', dependencies: ['drizzle-plugin'] }),
 );
 
 await fastify.register(fastifyCors, {
   origin: fastify.config.NODE_ENV === ENV.DEVELOPMENT ? '*' : fastify.config.ALLOWED_ORIGIN,
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
 });
-
 await fastify.register(fastifyHelmet, { global: true, contentSecurityPolicy: false });
 await fastify.register(fastifySensible);
 await fastify.register(fastifyMultipart);
-
 await fastify.register(fastifyRateLimit, {
   max: 100,
   timeWindow: '1 minute',
@@ -74,16 +72,16 @@ await fastify.register(fastifySwagger, {
   openapi: {
     openapi: '3.0.3',
     info: {
-      title: 'Lab 8 API — Students (MySQL / mysql2)',
-      description: 'REST API на базі MySQL через нативний драйвер mysql2. Гілка Lab_8_MySQL.',
+      title: 'Lab 8 API — Students (Drizzle ORM + MySQL)',
+      description: 'REST API на базі MySQL через Drizzle ORM. Гілка Lab_8_Drizzle.',
       version: '1.0.0',
     },
     servers: [{ url: `http://localhost:${process.env.PORT || 3000}` }],
     tags: [
-      { name: 'health',  description: 'Перевірка стану сервера' },
+      { name: 'health', description: 'Перевірка стану сервера' },
       { name: 'items v1', description: 'Студенти — REST API v1' },
       { name: 'items v2', description: 'Студенти — REST API v2 (з пагінацією)' },
-      { name: 'backups',  description: 'Завантаження gzip-бекапів (admin)' },
+      { name: 'backups', description: 'Завантаження gzip-бекапів (admin)' },
       { name: 'github v1 (REST)', description: 'GitHub-інтеграція' },
       { name: 'github v2 (REST + GraphQL)', description: 'GitHub GraphQL з фолбеком' },
     ],
@@ -92,16 +90,11 @@ await fastify.register(fastifySwagger, {
     },
   },
 });
-
 await fastify.register(fastifySwaggerUi, {
   routePrefix: '/docs',
   uiConfig: { docExpansion: 'list', deepLinking: true },
 });
-
-await fastify.register(fastifyStatic, {
-  root: join(__dirname, 'uploads'),
-  prefix: '/files',
-});
+await fastify.register(fastifyStatic, { root: join(__dirname, 'uploads'), prefix: '/files' });
 
 fastify.setErrorHandler((error, request, reply) => {
   fastify.log.error({ err: error, url: request.url, method: request.method }, 'Request error');

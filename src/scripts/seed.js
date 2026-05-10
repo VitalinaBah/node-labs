@@ -1,4 +1,7 @@
 import mysql from 'mysql2/promise';
+import { drizzle } from 'drizzle-orm/mysql2';
+import { count } from 'drizzle-orm';
+import { students } from '../../db/schema.js';
 
 const FORCE = process.argv.includes('--force');
 
@@ -10,36 +13,38 @@ const SAMPLE = [
 ];
 
 const seed = async () => {
-  const conn = await mysql.createConnection({
+  const pool = mysql.createPool({
     host: process.env.MYSQL_HOST,
     port: Number(process.env.MYSQL_PORT),
     user: process.env.MYSQL_USER,
     password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DB,
   });
+  const db = drizzle(pool);
   console.log('[SEED] connected');
 
-  const [rows] = await conn.execute('SELECT COUNT(*) AS total FROM students');
-  const existing = Number(rows[0].total);
+  const [{ total }] = await db.select({ total: count() }).from(students);
 
   if (FORCE) {
-    await conn.execute('DELETE FROM students');
-    await conn.execute('ALTER TABLE students AUTO_INCREMENT = 1');
-    console.log('[SEED] --force: cleared table');
-  } else if (existing > 0) {
-    console.log(`[SEED] table has ${existing} rows — skip (use seed:force)`);
-    await conn.end();
+    await db.delete(students);
+    console.log('[SEED] --force: cleared');
+  } else if (Number(total) > 0) {
+    console.log(`[SEED] table has ${total} rows — skip (use seed:force)`);
+    await pool.end();
     return;
   }
 
   for (const s of SAMPLE) {
-    await conn.execute(
-      'INSERT INTO students (name, grades, course, email, image) VALUES (?, ?, ?, ?, NULL)',
-      [s.name, JSON.stringify(s.grades), s.course, s.email],
-    );
+    await db.insert(students).values({
+      name: s.name,
+      grades: s.grades,
+      course: s.course,
+      email: s.email,
+      image: null,
+    });
   }
   console.log(`[SEED] inserted ${SAMPLE.length} students`);
-  await conn.end();
+  await pool.end();
 };
 
 seed().catch((err) => { console.error(err); process.exit(1); });
