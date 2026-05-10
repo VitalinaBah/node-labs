@@ -1,19 +1,36 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import mongoose from 'mongoose';
+import { Student } from '../../db/models/student.model.js';
 
-const DATA_DIR = path.join(process.cwd(), 'data', 'items');
+const FORCE = process.argv.includes('--force');
 
-const INITIAL_STUDENTS = [
-  { id: 1, name: 'Ivan', grades: [5, 4, 5], course: 2, email: 'ivan@example.com', image: null },
-  { id: 2, name: 'Anna', grades: [4, 4, 5], course: 3, email: 'anna@example.com', image: null },
+const SAMPLE = [
+  { name: 'Ivan',   course: 2, grades: [5, 4, 5], email: 'ivan@example.com'  },
+  { name: 'Anna',   course: 3, grades: [4, 5, 5], email: 'anna@example.com'  },
+  { name: 'Petro',  course: 1, grades: [3, 4, 4], email: 'petro@example.com' },
+  { name: 'Maria',  course: 4, grades: [5, 5, 5], email: 'maria@example.com' },
 ];
 
-await fs.mkdir(DATA_DIR, { recursive: true });
+const seed = async () => {
+  const url = process.env.MONGO_URL;
+  const dbName = process.env.MONGO_DB_NAME;
+  if (!url) { console.error('MONGO_URL is required'); process.exit(1); }
 
-for (const student of INITIAL_STUDENTS) {
-  const filePath = path.join(DATA_DIR, `${student.id}.json`);
-  await fs.writeFile(filePath, JSON.stringify(student, null, 2), 'utf-8');
-  console.log(`Created: ${filePath}`);
-}
+  await mongoose.connect(url, { dbName });
+  console.log('[SEED] connected');
 
-console.log('Seed completed.');
+  const existing = await Student.countDocuments();
+  if (FORCE) {
+    await Student.deleteMany({});
+    console.log('[SEED] --force: cleared collection');
+  } else if (existing > 0) {
+    console.log(`[SEED] collection has ${existing} docs — skip (use seed:force to override)`);
+    await mongoose.connection.close();
+    return;
+  }
+
+  const inserted = await Student.insertMany(SAMPLE);
+  console.log(`[SEED] inserted ${inserted.length} students`);
+  await mongoose.connection.close();
+};
+
+seed().catch((err) => { console.error(err); process.exit(1); });

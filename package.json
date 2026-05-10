@@ -1,13 +1,10 @@
 {
-  "name": "lab7-server",
+  "name": "lab8-mongo-server",
   "version": "1.0.0",
-  "description": "Лабораторна 7 — Streams, gzip, Transform, NDJSON, WebSocket + EventEmitter (Variant 4: Students)",
+  "description": "Лабораторна 8 — MongoDB / Mongoose (Variant 4: Students)",
   "type": "module",
   "main": "server.js",
-  "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=10.0.0"
-  },
+  "engines": { "node": ">=20.0.0", "npm": ">=10.0.0" },
   "scripts": {
     "start": "node --env-file=.env server.js",
     "predev": "npm run check",
@@ -17,8 +14,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run lint && npm run format:check",
-    "seed": "node src/scripts/seed.js",
-    "migrate": "node src/migrations/migrate.js",
+    "seed": "node --env-file=.env src/scripts/seed.js",
+    "seed:force": "node --env-file=.env src/scripts/seed.js --force",
     "external": "json-server db.json --port 3001"
   },
   "imports": {
@@ -30,8 +27,7 @@
     "#repositories/*": "./repositories/*",
     "#services/*": "./services/*",
     "#plugins/*": "./plugins/*",
-    "#transforms/*": "./src/transforms/*",
-    "#streams/*": "./src/streams/*"
+    "#transforms/*": "./src/transforms/*"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
@@ -48,7 +44,9 @@
     "ajv-formats": "^3.0.1",
     "csv-parse": "^6.2.1",
     "csv-stringify": "^6.7.0",
-    "fastify": "^5.8.4"
+    "fastify": "^5.8.4",
+    "fastify-plugin": "^5.0.1",
+    "mongoose": "^8.8.4"
   },
   "devDependencies": {
     "json-server": "^0.17.4",

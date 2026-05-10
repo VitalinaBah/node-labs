@@ -1,105 +1,81 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import StudentModel from '../src/models/item.model.js';
-
-const DATA_DIR = path.join(process.cwd(), 'data', 'items');
-
-const atomicWrite = async (filePath, data) => {
-  const tmpPath = filePath.replace('.json', '.tmp.json');
-  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
-  await fs.rename(tmpPath, filePath);
-};
-
-const getFilePath = (id) => path.join(DATA_DIR, `${id}.json`);
-
-const readStudent = async (id) => {
-  const content = await fs.readFile(getFilePath(id), 'utf-8');
-  return JSON.parse(content);
-};
-
-const listStudentFiles = async () => {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const files = (await fs.readdir(DATA_DIR)).filter((f) => f.endsWith('.json'));
-  // сортуємо за числовим id, щоб порядок був стабільним для пагінації
-  return files.sort(
-    (a, b) => Number(a.replace('.json', '')) - Number(b.replace('.json', '')),
-  );
-};
-
-export const findAll = async () => {
-  const files = await listStudentFiles();
-  const students = await Promise.all(
-    files.map((f) => readStudent(f.replace('.json', ''))),
-  );
-  return students;
-};
-
-export const findByCourse = async (course) => {
-  const all = await findAll();
-  return all.filter((s) => Number(s.course) === Number(course));
-};
-
-export const findById = async (id) => {
-  try {
-    return await readStudent(id);
-  } catch {
-    return null;
-  }
-};
+import { Student } from '../db/models/student.model.js';
 
 /**
- * Поступова пагінація: читає файли по одному (без Promise.all і без findAll),
- * накопичує лише потрібну сторінку. Опційний фільтр за course.
- * Повертає { data, total } — total це кількість записів, що пройшли фільтр.
+ * Фабрика репозиторію студентів. Отримує Mongoose-модель через DI:
+ *   const studentsRepo = createStudentsRepository(fastify.mongoose);
+ *
+ * Зберігає той самий публічний API, що й файловий репозиторій з попередніх лабораторних,
+ * щоб контролери залишилися без змін поведінкою.
  */
-export const findPage = async ({ page = 1, limit = 10, course } = {}) => {
-  const files = await listStudentFiles();
+export const createStudentsRepository = (/* mongoose */) => {
+  const toPlain = (doc) => {
+    if (!doc) return null;
+    const obj = typeof doc.toObject === 'function' ? doc.toObject() : { ...doc };
+    return { id: String(obj._id ?? obj.id), ...obj, _id: undefined };
+  };
 
-  const startIdx = (page - 1) * limit;
-  const endIdx = startIdx + limit;
+  const findAll = async () => {
+    const docs = await Student.find({}).lean();
+    return docs.map(toPlain);
+  };
 
-  const data = [];
-  let total = 0;
+  const findByCourse = async (course) => {
+    const docs = await Student.find({ course: Number(course) }).lean();
+    return docs.map(toPlain);
+  };
 
-  for (const file of files) {
-    const student = await readStudent(file.replace('.json', ''));
-    if (course !== undefined && Number(student.course) !== Number(course)) {
-      continue;
+  const findById = async (id) => {
+    try {
+      const doc = await Student.findById(id).lean();
+      return toPlain(doc);
+    } catch {
+      return null;
     }
-    if (total >= startIdx && total < endIdx) {
-      data.push(student);
+  };
+
+  /**
+   * Поступова пагінація. Mongo вміє це нативно через .skip().limit() — і ми не
+   * витягуємо у пам'ять увесь набір, лише сторінку. countDocuments окремим запитом.
+   */
+  const findPage = async ({ page = 1, limit = 10, course } = {}) => {
+    const filter = course !== undefined ? { course: Number(course) } : {};
+    const total = await Student.countDocuments(filter);
+    const docs = await Student.find(filter)
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+    return { data: docs.map(toPlain), total };
+  };
+
+  const create = async (data) => {
+    const doc = await Student.create(data);
+    return toPlain(doc.toObject());
+  };
+
+  const update = async (id, updates) => {
+    try {
+      const doc = await Student.findByIdAndUpdate(
+        id,
+        { $set: updates },
+        { new: true, runValidators: true },
+      ).lean();
+      return toPlain(doc);
+    } catch {
+      return null;
     }
-    total++;
-  }
+  };
 
-  return { data, total };
-};
+  const remove = async (id) => {
+    try {
+      const res = await Student.findByIdAndDelete(id).lean();
+      return Boolean(res);
+    } catch {
+      return false;
+    }
+  };
 
-export const create = async (data) => {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  // для генерації нового id достатньо знати найбільший — читаємо лише імена файлів,
-  // не самі файли
-  const files = await listStudentFiles();
-  const ids = files.map((f) => Number(f.replace('.json', '')));
-  const newId = ids.length > 0 ? Math.max(...ids) + 1 : 1;
-  const newStudent = { ...StudentModel, ...data, id: newId };
-  await atomicWrite(getFilePath(newId), newStudent);
-  return newStudent;
-};
+  /** Cursor для NDJSON / CSV stream — Mongoose віддає Readable у objectMode. */
+  const cursor = (filter = {}) => Student.find(filter).lean().cursor();
 
-export const update = async (id, updates) => {
-  const student = await findById(id);
-  if (!student) return null;
-  const updated = { ...student, ...updates, id: student.id };
-  await atomicWrite(getFilePath(id), updated);
-  return updated;
-};
-
-export const remove = async (id) => {
-  try {
-    await fs.unlink(getFilePath(id));
-    return true;
-  } catch {
-    return false;
-  }
+  return { findAll, findByCourse, findById, findPage, create, update, remove, cursor };
 };
