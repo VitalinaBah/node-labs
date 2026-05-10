@@ -1,105 +1,117 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import StudentModel from '../src/models/item.model.js';
-
-const DATA_DIR = path.join(process.cwd(), 'data', 'items');
-
-const atomicWrite = async (filePath, data) => {
-  const tmpPath = filePath.replace('.json', '.tmp.json');
-  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
-  await fs.rename(tmpPath, filePath);
-};
-
-const getFilePath = (id) => path.join(DATA_DIR, `${id}.json`);
-
-const readStudent = async (id) => {
-  const content = await fs.readFile(getFilePath(id), 'utf-8');
-  return JSON.parse(content);
-};
-
-const listStudentFiles = async () => {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const files = (await fs.readdir(DATA_DIR)).filter((f) => f.endsWith('.json'));
-  // сортуємо за числовим id, щоб порядок був стабільним для пагінації
-  return files.sort(
-    (a, b) => Number(a.replace('.json', '')) - Number(b.replace('.json', '')),
-  );
-};
-
-export const findAll = async () => {
-  const files = await listStudentFiles();
-  const students = await Promise.all(
-    files.map((f) => readStudent(f.replace('.json', ''))),
-  );
-  return students;
-};
-
-export const findByCourse = async (course) => {
-  const all = await findAll();
-  return all.filter((s) => Number(s.course) === Number(course));
-};
-
-export const findById = async (id) => {
-  try {
-    return await readStudent(id);
-  } catch {
-    return null;
-  }
-};
+import { Readable } from 'node:stream';
 
 /**
- * Поступова пагінація: читає файли по одному (без Promise.all і без findAll),
- * накопичує лише потрібну сторінку. Опційний фільтр за course.
- * Повертає { data, total } — total це кількість записів, що пройшли фільтр.
+ * Фабрика репозиторію над mysql2 pool. DI: createStudentsRepository(fastify.mysql).
+ * Не імпортує екземпляр Fastify напряму — отримує pool через параметр.
  */
-export const findPage = async ({ page = 1, limit = 10, course } = {}) => {
-  const files = await listStudentFiles();
-
-  const startIdx = (page - 1) * limit;
-  const endIdx = startIdx + limit;
-
-  const data = [];
-  let total = 0;
-
-  for (const file of files) {
-    const student = await readStudent(file.replace('.json', ''));
-    if (course !== undefined && Number(student.course) !== Number(course)) {
-      continue;
+export const createStudentsRepository = (pool) => {
+  // mysql2 повертає JSON колонку як рядок — парсимо вручну
+  const fromRow = (row) => {
+    if (!row) return null;
+    let grades = row.grades;
+    if (typeof grades === 'string') {
+      try { grades = JSON.parse(grades); } catch { grades = []; }
     }
-    if (total >= startIdx && total < endIdx) {
-      data.push(student);
+    return {
+      id: row.id,
+      name: row.name,
+      grades: grades ?? [],
+      course: row.course,
+      email: row.email,
+      image: row.image,
+    };
+  };
+
+  const findAll = async () => {
+    const [rows] = await pool.execute('SELECT * FROM students ORDER BY id');
+    return rows.map(fromRow);
+  };
+
+  const findByCourse = async (course) => {
+    const [rows] = await pool.execute(
+      'SELECT * FROM students WHERE course = ? ORDER BY id',
+      [Number(course)],
+    );
+    return rows.map(fromRow);
+  };
+
+  const findById = async (id) => {
+    const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [Number(id)]);
+    return rows.length ? fromRow(rows[0]) : null;
+  };
+
+  /** Поступова пагінація через SQL LIMIT/OFFSET. */
+  const findPage = async ({ page = 1, limit = 10, course } = {}) => {
+    const params = [];
+    let where = '';
+    if (course !== undefined) {
+      where = 'WHERE course = ?';
+      params.push(Number(course));
     }
-    total++;
-  }
+    const [countRows] = await pool.execute(
+      `SELECT COUNT(*) AS total FROM students ${where}`,
+      params,
+    );
+    const total = Number(countRows[0].total);
 
-  return { data, total };
-};
+    const offset = (page - 1) * limit;
+    const [rows] = await pool.execute(
+      `SELECT * FROM students ${where} ORDER BY id LIMIT ? OFFSET ?`,
+      [...params, Number(limit), Number(offset)],
+    );
+    return { data: rows.map(fromRow), total };
+  };
 
-export const create = async (data) => {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  // для генерації нового id достатньо знати найбільший — читаємо лише імена файлів,
-  // не самі файли
-  const files = await listStudentFiles();
-  const ids = files.map((f) => Number(f.replace('.json', '')));
-  const newId = ids.length > 0 ? Math.max(...ids) + 1 : 1;
-  const newStudent = { ...StudentModel, ...data, id: newId };
-  await atomicWrite(getFilePath(newId), newStudent);
-  return newStudent;
-};
+  const create = async (data) => {
+    const [result] = await pool.execute(
+      'INSERT INTO students (name, grades, course, email, image) VALUES (?, ?, ?, ?, ?)',
+      [
+        data.name,
+        JSON.stringify(data.grades ?? []),
+        Number(data.course),
+        data.email ?? null,
+        data.image ?? null,
+      ],
+    );
+    return findById(result.insertId);
+  };
 
-export const update = async (id, updates) => {
-  const student = await findById(id);
-  if (!student) return null;
-  const updated = { ...student, ...updates, id: student.id };
-  await atomicWrite(getFilePath(id), updated);
-  return updated;
-};
+  const update = async (id, updates) => {
+    const existing = await findById(id);
+    if (!existing) return null;
+    const merged = { ...existing, ...updates };
+    await pool.execute(
+      'UPDATE students SET name = ?, grades = ?, course = ?, email = ?, image = ? WHERE id = ?',
+      [
+        merged.name,
+        JSON.stringify(merged.grades ?? []),
+        Number(merged.course),
+        merged.email ?? null,
+        merged.image ?? null,
+        Number(id),
+      ],
+    );
+    return findById(id);
+  };
 
-export const remove = async (id) => {
-  try {
-    await fs.unlink(getFilePath(id));
-    return true;
-  } catch {
-    return false;
-  }
+  const remove = async (id) => {
+    const [result] = await pool.execute('DELETE FROM students WHERE id = ?', [Number(id)]);
+    return result.affectedRows > 0;
+  };
+
+  /**
+   * Курсор для NDJSON / CSV. Використовуємо нативний mysql2 stream
+   * через pool.query(...).stream() — без буферизації всіх рядків.
+   */
+  const cursor = () => {
+    const queryStream = pool.pool.query('SELECT * FROM students ORDER BY id').stream();
+    // Оборачиваємо у objectMode Readable з парсингом grades
+    return Readable.from((async function* () {
+      for await (const row of queryStream) {
+        yield fromRow(row);
+      }
+    })(), { objectMode: true });
+  };
+
+  return { findAll, findByCourse, findById, findPage, create, update, remove, cursor };
 };
