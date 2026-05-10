@@ -30,21 +30,15 @@ export const fetchWithRetry = async (url, options = {}, log) => {
   throw lastErr;
 };
 
-/**
- * Сервіс роботи з зовнішнім API (json-server). DI: factory отримує redis і конфіг.
- * Lab 6: був файловий кеш у data/cache/reference.json. Lab 9: Redis з TTL 120с.
- */
 export const createExternalService = ({ redis, baseUrl, log }) => {
   const findCourseById = async (id) => {
     const key = REDIS_KEYS.COURSE(id);
-
     try {
       const cached = await redis.get(key);
       if (cached !== null) return JSON.parse(cached);
     } catch (err) {
-      log?.warn?.({ err }, '[external] redis read failed, fall back to API');
+      log?.warn?.({ err }, '[external] redis read failed');
     }
-
     try {
       const res = await fetchWithRetry(`${baseUrl}/courses/${id}`, {}, log);
       const data = await res.json();
