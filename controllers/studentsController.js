@@ -1,5 +1,5 @@
 import * as studentsRepo from '#repositories/studentsRepository.js';
-import { stringify } from 'csv-stringify/sync';
+import { stringify as stringifyStream } from 'csv-stringify';
 import { parse } from 'csv-parse/sync';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,6 +10,10 @@ import addFormats from 'ajv-formats';
 import { studentBodySchema } from '#schemas/studentSchema.js';
 import { formatImageUrl } from '#utils/formatImageUrl.js';
 import { findCourseById } from '../services/externalService.js';
+import { eventBus, STUDENT_EVENTS } from '#services/eventBus.js';
+import { createStudentsReadable } from '#streams/studentsReadable.js';
+import { StudentAvgGradeTransform } from '#transforms/studentAvgGradeTransform.js';
+import { NdjsonTransform } from '#transforms/ndjsonTransform.js';
 
 const ajv = new Ajv();
 addFormats(ajv);
@@ -28,21 +32,17 @@ const getStudents = async (request, reply) => {
 };
 
 // GET /api/v2/students  — пагінований список
+// Уся валідація і дефолти page/limit/course описані у JSON Schema (paginationQuerySchema).
+// Fastify через ajv (useDefaults + coerceTypes) сам перетворює query-string у числа
+// і підставляє дефолти, тому контролер просто читає готові значення.
 const getStudentsPaginated = async (request, reply) => {
-  const page = Number(request.query.page) || 1;
-  const limit = Number(request.query.limit) || 10;
-  const courseFilter = request.query.course;
+  const { page, limit, course } = request.query;
 
-  let all = await studentsRepo.findAll();
-  if (courseFilter !== undefined) {
-    all = all.filter((s) => Number(s.course) === Number(courseFilter));
-  }
+  // Поступове читання файлів — без findAll(), без Promise.all,
+  // без накопичення всього набору в пам'яті.
+  const { data: slice, total } = await studentsRepo.findPage({ page, limit, course });
 
-  const total = all.length;
   const totalPages = Math.max(1, Math.ceil(total / limit));
-  const start = (page - 1) * limit;
-  const slice = all.slice(start, start + limit);
-
   const data = slice.map((s) => ({ ...s, image: formatImageUrl(request, s.image) }));
 
   return reply.send({
@@ -59,15 +59,13 @@ const getStudentById = async (request, reply) => {
   return reply.send({ ...student, image: formatImageUrl(request, student.image) });
 };
 
-// GET /api/v2/students/:id  — з деталями курсу із зовнішнього API
+// GET /api/v1/students/:id/details — з даними курсу із зовнішнього API
 const getStudentByIdWithDetails = async (request, reply) => {
   const { id } = request.params;
   const student = await studentsRepo.findById(id);
   if (!student) return reply.notFound('Student not found');
 
-  const courseDetails = student.course
-    ? await findCourseById(student.course)
-    : null;
+  const courseDetails = student.course ? await findCourseById(student.course) : null;
 
   return reply.send({
     ...student,
@@ -76,24 +74,51 @@ const getStudentByIdWithDetails = async (request, reply) => {
   });
 };
 
-// GET /api/v1/students/export
+// GET /api/v1/students/export?transform=true
+// Lab 7: потоковий експорт через csv-stringify; за наявності transform=true
+// дані проходять через StudentAvgGradeTransform.
 const getStudentsExport = async (request, reply) => {
-  const students = await studentsRepo.findAll();
+  const useTransform = String(request.query?.transform).toLowerCase() === 'true';
 
-  const csv = stringify(students, {
+  const columns = useTransform
+    ? ['id', 'name', 'course', 'avgGrade', 'email', 'image']
+    : ['id', 'name', 'course', 'grades', 'email', 'image'];
+
+  const csvStream = stringifyStream({
     header: true,
-    columns: ['id', 'name', 'course', 'grades', 'email', 'image'],
+    columns,
+    cast: {
+      object: (v) => (Array.isArray(v) ? v.join(',') : JSON.stringify(v)),
+    },
   });
 
-  reply.header('Content-Type', 'text/csv');
-  reply.header('Content-Disposition', 'attachment; filename="students.csv"');
-  return reply.send(csv);
+  reply.header('Content-Type', 'text/csv; charset=utf-8');
+  reply.header(
+    'Content-Disposition',
+    `attachment; filename="students${useTransform ? '-transformed' : ''}.csv"`,
+  );
+
+  const source = createStudentsReadable();
+
+  if (useTransform) {
+    return reply.send(source.pipe(new StudentAvgGradeTransform()).pipe(csvStream));
+  }
+  return reply.send(source.pipe(csvStream));
+};
+
+// GET /api/v1/students/stream — NDJSON
+const getStudentsStream = async (request, reply) => {
+  reply.type('application/x-ndjson');
+  const source = createStudentsReadable();
+  return reply.send(source.pipe(new NdjsonTransform()));
 };
 
 // POST /api/v*/students
 const createStudent = async (request, reply) => {
   const newStudent = await studentsRepo.create(request.body);
-  return reply.code(201).send({ ...newStudent, image: formatImageUrl(request, newStudent.image) });
+  const dto = { ...newStudent, image: formatImageUrl(request, newStudent.image) };
+  eventBus.emit(STUDENT_EVENTS.CREATED, dto);
+  return reply.code(201).send(dto);
 };
 
 // PATCH /api/v*/students/:id
@@ -101,7 +126,9 @@ const updateStudent = async (request, reply) => {
   const { id } = request.params;
   const updated = await studentsRepo.update(id, request.body);
   if (!updated) return reply.notFound('Student not found');
-  return reply.send({ ...updated, image: formatImageUrl(request, updated.image) });
+  const dto = { ...updated, image: formatImageUrl(request, updated.image) };
+  eventBus.emit(STUDENT_EVENTS.UPDATED, dto);
+  return reply.send(dto);
 };
 
 // DELETE /api/v*/students/:id
@@ -109,6 +136,7 @@ const deleteStudent = async (request, reply) => {
   const { id } = request.params;
   const removed = await studentsRepo.remove(id);
   if (!removed) return reply.notFound('Student not found');
+  eventBus.emit(STUDENT_EVENTS.DELETED, Number(id));
   return reply.send({ message: 'Student removed' });
 };
 
@@ -156,7 +184,11 @@ const importStudents = async (request, reply) => {
       continue;
     }
 
-    await studentsRepo.create(record);
+    const created = await studentsRepo.create(record);
+    eventBus.emit(STUDENT_EVENTS.CREATED, {
+      ...created,
+      image: formatImageUrl(request, created.image),
+    });
     imported++;
   }
 
@@ -196,8 +228,10 @@ const uploadStudentImage = async (request, reply) => {
 
   const relativePath = `/${id}/${fileName}`;
   const updated = await studentsRepo.update(id, { image: relativePath });
+  const dto = { ...updated, image: formatImageUrl(request, relativePath) };
+  eventBus.emit(STUDENT_EVENTS.UPDATED, dto);
 
-  return reply.send({ ...updated, image: formatImageUrl(request, relativePath) });
+  return reply.send(dto);
 };
 
 export {
@@ -206,6 +240,7 @@ export {
   getStudentById,
   getStudentByIdWithDetails,
   getStudentsExport,
+  getStudentsStream,
   createStudent,
   updateStudent,
   deleteStudent,
