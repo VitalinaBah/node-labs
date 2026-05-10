@@ -6,11 +6,8 @@ const RETRIES = 3;
 export const fetchWithTimeout = async (url, options = {}) => {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...options, signal: ctrl.signal });
-  } finally {
-    clearTimeout(t);
-  }
+  try { return await fetch(url, { ...options, signal: ctrl.signal }); }
+  finally { clearTimeout(t); }
 };
 
 export const fetchWithRetry = async (url, options = {}, log) => {
@@ -30,35 +27,23 @@ export const fetchWithRetry = async (url, options = {}, log) => {
   throw lastErr;
 };
 
-/**
- * Сервіс роботи з зовнішнім API (json-server). DI: factory отримує redis і конфіг.
- * Lab 6: був файловий кеш у data/cache/reference.json. Lab 9: Redis з TTL 120с.
- */
 export const createExternalService = ({ redis, baseUrl, log }) => {
   const findCourseById = async (id) => {
     const key = REDIS_KEYS.COURSE(id);
-
     try {
       const cached = await redis.get(key);
       if (cached !== null) return JSON.parse(cached);
-    } catch (err) {
-      log?.warn?.({ err }, '[external] redis read failed, fall back to API');
-    }
-
+    } catch (err) { log?.warn?.({ err }, '[external] redis read failed'); }
     try {
       const res = await fetchWithRetry(`${baseUrl}/courses/${id}`, {}, log);
       const data = await res.json();
-      try {
-        await redis.set(key, JSON.stringify(data), 'EX', REDIS_TTL.COURSE);
-      } catch (err) {
-        log?.warn?.({ err }, '[external] redis write failed');
-      }
+      try { await redis.set(key, JSON.stringify(data), 'EX', REDIS_TTL.COURSE); }
+      catch (err) { log?.warn?.({ err }, '[external] redis write failed'); }
       return data;
     } catch (err) {
-      log?.warn?.({ err }, '[external] external API unavailable — graceful degradation');
+      log?.warn?.({ err }, '[external] external API unavailable');
       return null;
     }
   };
-
   return { findCourseById };
 };
