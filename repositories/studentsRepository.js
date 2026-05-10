@@ -17,22 +17,26 @@ const readStudent = async (id) => {
   return JSON.parse(content);
 };
 
-export const findAll = async () => {
+const listStudentFiles = async () => {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  const files = await fs.readdir(DATA_DIR);
-  const jsonFiles = files.filter((f) => f.endsWith('.json'));
+  const files = (await fs.readdir(DATA_DIR)).filter((f) => f.endsWith('.json'));
+  // сортуємо за числовим id, щоб порядок був стабільним для пагінації
+  return files.sort(
+    (a, b) => Number(a.replace('.json', '')) - Number(b.replace('.json', '')),
+  );
+};
+
+export const findAll = async () => {
+  const files = await listStudentFiles();
   const students = await Promise.all(
-    jsonFiles.map((f) => {
-      const id = f.replace('.json', '');
-      return readStudent(id);
-    }),
+    files.map((f) => readStudent(f.replace('.json', ''))),
   );
   return students;
 };
 
 export const findByCourse = async (course) => {
   const all = await findAll();
-  return all.filter((s) => s.course === Number(course));
+  return all.filter((s) => Number(s.course) === Number(course));
 };
 
 export const findById = async (id) => {
@@ -43,10 +47,41 @@ export const findById = async (id) => {
   }
 };
 
+/**
+ * Поступова пагінація: читає файли по одному (без Promise.all і без findAll),
+ * накопичує лише потрібну сторінку. Опційний фільтр за course.
+ * Повертає { data, total } — total це кількість записів, що пройшли фільтр.
+ */
+export const findPage = async ({ page = 1, limit = 10, course } = {}) => {
+  const files = await listStudentFiles();
+
+  const startIdx = (page - 1) * limit;
+  const endIdx = startIdx + limit;
+
+  const data = [];
+  let total = 0;
+
+  for (const file of files) {
+    const student = await readStudent(file.replace('.json', ''));
+    if (course !== undefined && Number(student.course) !== Number(course)) {
+      continue;
+    }
+    if (total >= startIdx && total < endIdx) {
+      data.push(student);
+    }
+    total++;
+  }
+
+  return { data, total };
+};
+
 export const create = async (data) => {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  const all = await findAll();
-  const newId = all.length > 0 ? Math.max(...all.map((s) => s.id)) + 1 : 1;
+  // для генерації нового id достатньо знати найбільший — читаємо лише імена файлів,
+  // не самі файли
+  const files = await listStudentFiles();
+  const ids = files.map((f) => Number(f.replace('.json', '')));
+  const newId = ids.length > 0 ? Math.max(...ids) + 1 : 1;
   const newStudent = { ...StudentModel, ...data, id: newId };
   await atomicWrite(getFilePath(newId), newStudent);
   return newStudent;

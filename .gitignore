@@ -23,3 +23,4 @@ data/items/*.tmp.json
 # тестові артефакти ручного тестування
 import_test.json
 image.png
+_smoke.mjs

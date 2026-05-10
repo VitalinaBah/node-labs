@@ -32,21 +32,17 @@ const getStudents = async (request, reply) => {
 };
 
 // GET /api/v2/students  — пагінований список
+// Уся валідація і дефолти page/limit/course описані у JSON Schema (paginationQuerySchema).
+// Fastify через ajv (useDefaults + coerceTypes) сам перетворює query-string у числа
+// і підставляє дефолти, тому контролер просто читає готові значення.
 const getStudentsPaginated = async (request, reply) => {
-  const page = Number(request.query.page) || 1;
-  const limit = Number(request.query.limit) || 10;
-  const courseFilter = request.query.course;
+  const { page, limit, course } = request.query;
 
-  let all = await studentsRepo.findAll();
-  if (courseFilter !== undefined) {
-    all = all.filter((s) => Number(s.course) === Number(courseFilter));
-  }
+  // Поступове читання файлів — без findAll(), без Promise.all,
+  // без накопичення всього набору в пам'яті.
+  const { data: slice, total } = await studentsRepo.findPage({ page, limit, course });
 
-  const total = all.length;
   const totalPages = Math.max(1, Math.ceil(total / limit));
-  const start = (page - 1) * limit;
-  const slice = all.slice(start, start + limit);
-
   const data = slice.map((s) => ({ ...s, image: formatImageUrl(request, s.image) }));
 
   return reply.send({
