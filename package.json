@@ -1,7 +1,7 @@
 {
-  "name": "lab9-jwt-server",
+  "name": "lab10-server",
   "version": "1.0.0",
-  "description": "Лабораторна 9 — JWT auth з access/refresh + blacklist (Variant 4: Students)",
+  "description": "Лабораторна 10 — Тестування (Vitest) і Docker (Variant 4: Students)",
   "type": "module",
   "main": "server.js",
   "engines": { "node": ">=20.0.0", "npm": ">=10.0.0" },
@@ -15,7 +15,10 @@
     "db:push":     "drizzle-kit push",
     "seed":        "node --env-file=.env src/scripts/seed.js",
     "seed:force":  "node --env-file=.env src/scripts/seed.js --force",
-    "external":    "json-server db.json --port 3001"
+    "external":    "json-server db.json --port 3001",
+    "test":          "vitest run",
+    "test:watch":    "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "imports": {
     "#constants/*":    "./constants/*",
@@ -54,8 +57,11 @@
     "mysql2": "^3.11.5"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.8",
+    "dotenv": "^16.4.5",
     "drizzle-kit": "^0.28.1",
     "json-server": "^0.17.4",
-    "pino-pretty": "^13.1.3"
+    "pino-pretty": "^13.1.3",
+    "vitest": "^2.1.8"
   }
 }

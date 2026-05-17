@@ -1,0 +1,27 @@
+# Розширення для dev-середовища:
+# • build.target: builder — використовуємо ширший образ з dev-залежностями
+# • volume mount джерела — hot-reload коду
+# • npm run dev замість npm start
+# • прокидаємо порти БД та Redis назовні (для locally curl/redis-cli)
+services:
+  app:
+    build:
+      context: .
+      target: builder
+    image: lab10-app:dev
+    command: ["npm", "run", "dev"]
+    environment:
+      NODE_ENV: development
+    volumes:
+      - .:/app
+      - /app/node_modules    # анонімний том щоб не перетерти node_modules з образу
+    ports:
+      - "3000:3000"
+
+  mysql:
+    ports:
+      - "3307:3306"            # на хост виставляємо 3307 щоб не конфліктувати з локальним MySQL
+
+  redis:
+    ports:
+      - "6379:6379"

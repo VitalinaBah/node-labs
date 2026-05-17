@@ -1,0 +1,36 @@
+# Залежності
+node_modules
+npm-debug.log
+
+# Тести і coverage
+tests
+coverage
+*.test.js
+vitest.config.js
+
+# Env (надається через docker-compose)
+.env
+.env.*
+!.env.example
+
+# Git і IDE
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Документи і скрипти збірки звітів
+*.md
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# Дані що генеруються в runtime
+data/backups/*
+data/cache/*
+data/items/*
+uploads/*
+!**/.gitkeep

@@ -5,7 +5,7 @@ export const envSchema = {
   properties: {
     PORT: { type: 'string', pattern: '^[0-9]+$', default: '3000' },
     HOSTNAME: { type: 'string', minLength: 1, default: 'localhost' },
-    NODE_ENV: { type: 'string', enum: [ENV.DEVELOPMENT, ENV.PRODUCTION], default: ENV.DEVELOPMENT },
+    NODE_ENV: { type: 'string', enum: [ENV.DEVELOPMENT, ENV.PRODUCTION, 'test'], default: ENV.DEVELOPMENT },
     ADMIN_API_KEY: { type: 'string', minLength: 8 },
     ALLOWED_ORIGIN: { type: 'string', default: 'http://localhost:3000' },
     EXTERNAL_API_URL: { type: 'string', default: 'http://localhost:3001' },
@@ -17,6 +17,7 @@ export const envSchema = {
     MYSQL_DB: { type: 'string', default: 'lab8_students' },
     REDIS_HOST: { type: 'string', default: 'localhost' },
     REDIS_PORT: { type: 'string', pattern: '^[0-9]+$', default: '6379' },
+    REDIS_DB: { type: 'string', pattern: '^([0-9]|1[0-5])$', default: '0' },
     JWT_SECRET: { type: 'string', minLength: 32 },
   },
   required: [
